@@ -2,15 +2,7 @@
 
 Turns a **GeekMagic SmallTV Ultra** (the ~£10 ESP8266 "mini TV" from AliExpress) into a desk display showing your **Claude session and weekly usage limits**, with reset countdowns.
 
-```
- ✱ Claude
- Session          35% used
- ███████░░░░░░░░░░░░░░░░░
- ↻ Resets in 1h 20m
- Weekly           19% used
- ████░░░░░░░░░░░░░░░░░░░░
- ↻ Resets in 5d 16h
-```
+<p align="center"><img src="docs/display.jpg" alt="The display showing session and weekly usage" width="360"></p>
 
 - **No soldering.** You flash it over Wi-Fi through the stock firmware's update page.
 - **Your Claude login never touches the display.** A small script on your laptop reads your usage and sends just the numbers to the display.
