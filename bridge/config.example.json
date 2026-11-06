@@ -1,0 +1,6 @@
+{
+  "session_key": "PASTE_YOUR_sessionKey_COOKIE_HERE",
+  "push_token": "PASTE_THE_SAME_VALUE_AS_PUSH_TOKEN_IN_secrets.h",
+  "display": "smalltv.local",
+  "poll_seconds": 180
+}
