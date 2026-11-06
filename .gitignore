@@ -1,0 +1,10 @@
+# secrets - never commit
+smalltv/src/secrets.h
+bridge/config.json
+
+# build / runtime
+.pio/
+.vscode/
+.venv/
+__pycache__/
+bridge/bridge.log*
