@@ -18,6 +18,7 @@ Turns a **GeekMagic SmallTV Ultra** (the ~£10 ESP8266 "mini TV" from AliExpress
 - [Part 1: Flash the display](#part-1--flash-the-display)
 - [Part 2: Turn on wireless updates](#part-2--turn-on-wireless-updates)
 - [Part 3: Set up the laptop script](#part-3--set-up-the-laptop-script)
+  - [Running it on a Mac](#36-running-it-on-a-mac)
 - [Customising](#customising)
 - [What the display tells you](#what-the-display-tells-you)
 - [Troubleshooting](#troubleshooting)
@@ -41,7 +42,7 @@ The display only updates while your laptop is on and on the same network. After 
 ## What you need
 
 - A **GeekMagic SmallTV Ultra**, or the plain **SmallTV**. Both use an ESP-12F / ESP8266. The **Pro** model uses an ESP32 and **won't work** with this.
-- A **Windows laptop**. The script also runs on Mac and Linux; see [Troubleshooting](#troubleshooting).
+- A **Windows laptop or a Mac**. Mac setup is in [step 3.6](#36-running-it-on-a-mac). Linux works too; see [Troubleshooting](#troubleshooting).
 - **VS Code** with the **PlatformIO IDE** extension:
   1. Install VS Code.
   2. Open the Extensions panel (`Ctrl+Shift+X`).
@@ -114,10 +115,11 @@ The display remembers networks. If you take it somewhere new, it opens the setup
 
 From now on you update the display from VS Code over Wi-Fi, with no web page needed.
 
-1. Open `smalltv/platformio.ini`. At the bottom, delete the `;` at the start of the last 5 lines.
-2. Replace `YOUR_OTA_PASS` with your `OTA_PASS`.
-3. Check it looks exactly like this. The two indented lines are meant to be indented, and the other three must start at the left edge:
+1. In the `smalltv` folder, copy `ota.example.ini` and rename the copy to **`ota.ini`**. Like `secrets.h`, it's git-ignored, so your password never gets committed.
+2. In `ota.ini`, replace `YOUR_OTA_PASS` with your `OTA_PASS`.
+3. Check it looks exactly like this. The two indented lines are meant to be indented, and the others must start at the left edge:
    ```ini
+   [env:smalltv]
    upload_protocol = espota
    upload_port = smalltv.local
    upload_flags =
@@ -195,6 +197,63 @@ It then runs silently in the background whenever you're logged in.
 
 Resource use: it checks claude.ai once every 3 minutes and sleeps the rest of the time, so the battery and CPU impact is negligible.
 
+### 3.6 Running it on a Mac
+
+The `.bat` files are Windows-only. On a Mac, do steps 3.1–3.5 like this instead.
+
+**Install and test** (in Terminal):
+```bash
+cd path/to/Claude-Usage-Monitor/bridge
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp config.example.json config.json    # then fill it in as in step 3.3
+.venv/bin/python bridge.py --test     # should end with "Display answered HTTP 200"
+```
+To open the developer tools in step 3.2, press `Cmd+Option+I`.
+
+**Start it automatically when you log in.** macOS runs background programs from a *launch agent*. Create `~/Library/LaunchAgents/com.claude-usage-bridge.plist` with the following, replacing both `/FULL/PATH/TO/bridge` with your real path (e.g. `/Users/you/Documents/Claude-Usage-Monitor/bridge`):
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.claude-usage-bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/FULL/PATH/TO/bridge/.venv/bin/python</string>
+    <string>/FULL/PATH/TO/bridge/bridge.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>/FULL/PATH/TO/bridge</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/FULL/PATH/TO/bridge/bridge.err.log</string>
+</dict>
+</plist>
+```
+Then start it:
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.claude-usage-bridge.plist
+```
+
+**Where it runs and how to control it**
+
+| | |
+|---|---|
+| What runs | `bridge/bridge.py`, using the Python in `bridge/.venv`. No window; it runs in the background |
+| What starts it | The launch agent above. macOS starts it at every login and restarts it if it crashes |
+| Activity log | `bridge/bridge.log`: fetches, errors, and `Display updated OK` |
+| Crash log | `bridge/bridge.err.log`: empty unless the script crashed |
+| Is it running? | `launchctl print gui/$(id -u)/com.claude-usage-bridge \| grep state` |
+| Stop it | `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.claude-usage-bridge.plist` |
+| Start it | `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.claude-usage-bridge.plist` |
+| After editing `config.json` | Stop it, then start it |
+| Remove it for good | Stop it, then delete the `.plist` file |
+
+> 💡 **macOS Local Network privacy.** macOS silently blocks background Python from reaching devices on your network (`No route to host` in the log), and never offers a permission prompt for it. So on a Mac the script sends to the display through Apple's built-in `/usr/bin/curl`, which is allowed. You don't need to change any settings.
+
+The display only updates while the Mac is awake and on the same Wi-Fi. When it sleeps, the display shows `No update for Xm` after 10 minutes and recovers on its own when the Mac wakes.
+
 ---
 
 ## Customising
@@ -220,6 +279,9 @@ To change how often the script checks claude.ai, edit `poll_seconds` in `config.
 |---|---|
 | `Resetting...` | The window's reset time has passed. It updates at the next check, within 3 minutes |
 | Bar turns amber or red | Over 75% or over 90% used |
+| Weekly bar split into 7 segments | One segment per day of your weekly window. Days count from when the window started, not from midnight |
+| White marker on the weekly bar | Today's target: the end of the current day, ~14% per day. Stay left of it and your usage lasts the whole week |
+| Screen layout shifts up | A message has appeared at the bottom. When everything's fine, the layout spreads out to fill the whole screen |
 | `Waiting for laptop  <IP>` | No data received yet since the display booted |
 | `No update for Xm - laptop off?` | The laptop script hasn't sent anything for over 10 minutes |
 | `sessionKey expired - update it` | Copy a fresh `sessionKey` into `config.json` (step 3.2), then restart the script |
@@ -234,13 +296,13 @@ To change how often the script checks claude.ai, edit `poll_seconds` in `config.
 You've opened the wrong folder. Open the `smalltv` folder itself (step 1.2).
 
 **`unrecognized command-line option '--auth=...'` when uploading.**
-The upload lines in `platformio.ini` are indented when they shouldn't be. `upload_protocol`, `upload_port` and `upload_flags =` must start at the very left edge (Part 2, step 3).
+The upload lines in `ota.ini` are indented when they shouldn't be. `upload_protocol`, `upload_port` and `upload_flags =` must start at the very left edge (Part 2, step 3).
 
 **Upload says `Authenticating...OK` then `No response from device`.**
 Windows Firewall is blocking the display from connecting back to your laptop. Add the firewall rule and set your network to Private (Part 2, step 4).
 
 **Upload can't find `smalltv.local`.**
-Replace `smalltv.local` with the IP address shown on the display, in `platformio.ini` and/or `config.json`.
+Replace `smalltv.local` with the IP address shown on the display, in `ota.ini` and/or `config.json`.
 
 **`test.bat` says `FAILED (auth)`.**
 Your `sessionKey` is wrong or expired. Copy it again, including the whole value.
@@ -256,7 +318,7 @@ In `platformio.ini`:
 **More than one display on the same network.**
 Each needs a different name:
 1. Change `"smalltv"` in `ArduinoOTA.setHostname("smalltv")` in `main.cpp`.
-2. Use the new name in `upload_port` (`platformio.ini`) and `display` (`config.json`).
+2. Use the new name in `upload_port` (`ota.ini`) and `display` (`config.json`).
 
 **Upload failed, and now the display is stuck or blank.**
 - If the screen shows anything, wireless updates still work. Fix the code and Upload again.
@@ -265,14 +327,16 @@ Each needs a different name:
   2. Connect a 3.3 V USB-serial adapter to the TX, RX, 3V3 and GND pads.
   3. Hold GPIO0 to GND while plugging it in, then flash with `upload_protocol = esptool`.
 
-**Mac / Linux.**
+**Mac.** See [step 3.6](#36-running-it-on-a-mac).
+
+**Linux.**
 The `.bat` files are Windows-only, but the script itself works anywhere:
 ```bash
 cd bridge
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp config.example.json config.json   # then edit it
 .venv/bin/python bridge.py --test    # test
-.venv/bin/python bridge.py           # run (use launchd/systemd/cron @reboot to auto-start)
+.venv/bin/python bridge.py           # run (use a systemd user service or cron @reboot to auto-start)
 ```
 
 ---
@@ -286,7 +350,7 @@ cp config.example.json config.json   # then edit it
   - Wireless updates need `OTA_PASS`.
   - The setup hotspot is WPA2-protected and only appears when no known Wi-Fi is available.
 - **Limits of that protection:** traffic between the laptop and the display is plain HTTP on your local network, and the ESP8266's OTA authentication is basic. That's fine at home, but for extra isolation put the display on a guest or IoT network.
-- **Never commit `secrets.h` or `config.json`.** The `.gitignore` already excludes both.
+- **Never commit `secrets.h`, `ota.ini` or `config.json`.** The `.gitignore` already excludes all three.
 
 ## Credits
 

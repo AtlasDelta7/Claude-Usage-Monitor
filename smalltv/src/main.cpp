@@ -47,14 +47,26 @@ Limit sess, week;
 bool haveData = false;
 bool fresh = false;      // new data arrived
 int drawnPct[2] = {-3, -3};
+int drawnDay[2] = {-1, -1};
 uint32_t lastPush = 0;
 String err = "";
 String drawnReset[2] = {"", ""};
 String drawnFooter = "";
 
-// Layout (baselines)
+// Layout. ROOMY spreads everything over the whole screen; TIGHT squeezes it up
+// to leave room for the footer whenever there's an error/warning to show.
 const int X0 = 16, X1 = 224, BAR_W = X1 - X0;
-const int SEC_Y[2] = {48, 126};   // top of each section
+struct Layout {
+  int headY;       // centre line of the logo + "Claude" header
+  int secY[2];     // top of each section
+  int barOff, barH;  // progress bar: offset from section top, height
+  int mark;        // how far the weekly target marker sticks out above/below the bar
+  int resetOff;    // "Resets in" line: offset from section top (24 px tall)
+};
+const Layout ROOMY = {22, {50, 144}, 32, 14, 3, 50};   // sections 74 px tall, 20 px gap between them
+const Layout TIGHT = {24, {48, 126}, 32, 12, 2, 46};
+const int FOOTER_Y = 206;
+const Layout* L = &TIGHT;   // boot shows "Waiting for laptop" in the footer
 
 // ---------- helpers ----------
 
@@ -94,6 +106,15 @@ int shownPct(const Limit& l) {
   return l.pct;
 }
 
+// Which day (1-7) of the weekly window we're in; 0 = unknown.
+int targetDay(const Limit& l) {
+  if (!haveData) return 0;
+  long r = remaining(l);
+  if (r <= 0 || r > 7L * 86400) return 0;
+  long elapsed = 7L * 86400 - r;
+  return elapsed / 86400 + 1;
+}
+
 uint16_t barColour(int pct) {
   if (pct >= 90) return C_RED;
   if (pct >= 75) return C_AMBER;
@@ -101,13 +122,23 @@ uint16_t barColour(int pct) {
 }
 
 void drawLogo(int cx, int cy) {
-  // simple 8-ray asterisk
-  for (int i = 0; i < 8; i++) {
-    float a = i * PI / 4 + PI / 8;
-    float x0 = cx + 2.5f * cos(a), y0 = cy + 2.5f * sin(a);
-    float x1 = cx + 10.0f * cos(a), y1 = cy + 10.0f * sin(a);
-    tft.drawWideLine(x0, y0, x1, y1, 3, C_ACCENT, C_BG);
+  // Claude "spark": 12 rays with deliberately irregular angles, lengths and
+  // tip widths so it looks hand-drawn rather than like a symmetric asterisk.
+  // Each ray is thin at the centre and widens to a rounded tip. Drawn with
+  // anti-aliased wedge lines, so it costs no image data at all.
+  struct Ray { int16_t ang; uint8_t len, tip; };   // degrees, % of R, tip radius x10
+  static const Ray RAYS[] = {
+    {-95, 96, 18}, {-62, 70, 14}, {-30, 100, 17}, {3, 74, 15}, {35, 90, 18}, {60, 58, 13},
+    {88, 100, 17}, {118, 76, 15}, {146, 94, 16}, {176, 64, 14}, {203, 100, 18}, {236, 72, 14},
+  };
+  const float R = 11.5f;
+  for (const Ray& ray : RAYS) {
+    float a = ray.ang * DEG_TO_RAD, c = cosf(a), s = sinf(a);
+    float r = R * ray.len / 100.0f;
+    tft.drawWedgeLine(cx + 0.5f * c, cy + 0.5f * s, cx + r * c, cy + r * s,
+                      0.2f, ray.tip / 10.0f, C_ACCENT, C_BG);
   }
+  tft.fillSmoothCircle(cx, cy, 1, C_ACCENT, C_BG);   // clean up where the rays meet
 }
 
 // Draw into an off-screen buffer, then copy to the screen in one go (no flicker).
@@ -127,14 +158,23 @@ void flickerFree(int x, int y, int w, int h, F draw) {
 }
 
 void drawResetIcon(TFT_eSPI& g, int cx, int cy, uint16_t c) {
-  // circular arrow
-  g.drawArc(cx, cy, 7, 5, 40, 330, c, C_BG, false);
-  g.fillTriangle(cx - 9, cy - 4, cx - 1, cy - 4, cx - 5, cy + 1, c);
+  // clockwise "refresh" arrow: a ring with a gap on the right, arrowhead at
+  // the top end pointing down into the gap.
+  // TFT_eSPI arc angles: 0 = 6 o'clock, clockwise. Ring runs 4 o'clock -> 1:30.
+  g.drawArc(cx, cy, 7, 5, 300, 360, c, C_BG, true);
+  g.drawArc(cx, cy, 7, 5, 0, 225, c, C_BG, true);
+  // arrowhead at screen angle -45 deg (1:30), along the clockwise tangent
+  const float a = -45 * DEG_TO_RAD, ca = cosf(a), sa = sinf(a);
+  const float px = cx + 6 * ca, py = cy + 6 * sa;      // point on ring centre-line
+  const float tx = -sa, ty = ca;                       // tangent (clockwise)
+  g.fillTriangle(px + 3.5f * ca, py + 3.5f * sa,       // outer corner
+                 px - 3.5f * ca, py - 3.5f * sa,       // inner corner
+                 px + 4.5f * tx, py + 4.5f * ty, c);   // tip
 }
 
 void drawResetLine(int i, const Limit& l) {
   String t = resetText(l);
-  flickerFree(0, SEC_Y[i] + 46, 240, 24, [&](TFT_eSPI& g, int ox, int oy) {
+  flickerFree(0, L->secY[i] + L->resetOff, 240, 24, [&](TFT_eSPI& g, int ox, int oy) {
     drawResetIcon(g, ox + X0 + 8, oy + 11, C_SUB);
     g.setFreeFont(&FreeSans9pt7b);
     g.setTextColor(C_SUB);
@@ -145,7 +185,7 @@ void drawResetLine(int i, const Limit& l) {
 }
 
 void drawPctAndBar(int i, const Limit& l) {
-  int y = SEC_Y[i];
+  int y = L->secY[i];
   int pct = shownPct(l);
   String p = (haveData && pct >= 0) ? String(pct) + "% used" : "--";
   flickerFree(X1 - 118, y, 118, 28, [&](TFT_eSPI& g, int ox, int oy) {
@@ -156,19 +196,33 @@ void drawPctAndBar(int i, const Limit& l) {
   });
 
   // progress bar (drawn directly - takes ~1 ms, not visible)
-  int by = y + 32, bh = 12;
+  int by = y + L->barOff, bh = L->barH, mk = L->mark;
+  tft.fillRect(X0 - 1, by - mk, BAR_W + 2, bh + 2 * mk, C_BG);   // clears the old target marker too
   tft.fillSmoothRoundRect(X0, by, BAR_W, bh, bh / 2, C_TRACK, C_BG);
   if (haveData && pct > 0) {
     int w = (long)BAR_W * min(pct, 100) / 100;
     if (w < bh) w = bh;
     tft.fillSmoothRoundRect(X0, by, w, bh, bh / 2, barColour(pct), C_TRACK);
   }
+
+  // weekly bar: split into 7 day segments by gaps cut right through the bar,
+  // plus a white marker sticking out above and below at today's target (end of
+  // the current day, ~14% per day) - stay left of it to last the week.
+  int day = (i == 1) ? targetDay(l) : 0;
+  if (day) {
+    for (int d = 1; d < 7; d++) {
+      int x = X0 + (long)BAR_W * d / 7;
+      if (d == day) tft.fillRect(x - 1, by - mk, 3, bh + 2 * mk, C_TEXT);
+      else          tft.fillRect(x, by, 2, bh, C_BG);
+    }
+  }
+  drawnDay[i] = day;
   drawnPct[i] = haveData ? pct : -2;
 }
 
 void drawSection(int i, const char* label, const Limit& l) {
-  int y = SEC_Y[i];
-  tft.fillRect(0, y, 240, 46, C_BG);
+  int y = L->secY[i];
+  tft.fillRect(0, y, 240, L->resetOff, C_BG);
   tft.setTextDatum(BL_DATUM);
   tft.setFreeFont(&FreeSans12pt7b);
   tft.setTextColor(C_TEXT);
@@ -193,7 +247,8 @@ void drawFooter(bool force = false) {
   uint16_t c;
   String t = footerText(c);
   if (t == drawnFooter && !force) return;
-  flickerFree(0, 206, 240, 34, [&](TFT_eSPI& g, int ox, int oy) {
+  if (L != &TIGHT) return;   // only the tight layout has room for a footer
+  flickerFree(0, FOOTER_Y, 240, 240 - FOOTER_Y, [&](TFT_eSPI& g, int ox, int oy) {
     if (!t.length()) return;
     g.setTextFont(2);
     g.setTextColor(c, C_BG);
@@ -203,14 +258,14 @@ void drawFooter(bool force = false) {
   drawnFooter = t;
 }
 
-// Full redraw - only at boot
+// Full redraw - at boot, and when switching between the roomy/tight layouts
 void drawAll() {
   tft.fillScreen(C_BG);
-  drawLogo(X0 + 10, 24);
+  drawLogo(X0 + 10, L->headY);
   tft.setTextDatum(ML_DATUM);
   tft.setFreeFont(&FreeSansBold12pt7b);
   tft.setTextColor(C_TEXT);
-  tft.drawString("Claude", X0 + 30, 23);
+  tft.drawString("Claude", X0 + 30, L->headY - 1);
   drawSection(0, "Session", sess);
   drawSection(1, "Weekly", week);
   drawFooter(true);
@@ -218,12 +273,21 @@ void drawAll() {
 
 // Redraw only the parts whose content changed
 void refresh() {
+  // switch layout when a footer message appears or goes away
+  uint16_t fc;
+  const Layout* want = footerText(fc).length() ? &TIGHT : &ROOMY;
+  if (want != L) {
+    L = want;
+    drawAll();
+    return;
+  }
   Limit* ls[2] = {&sess, &week};
   for (int i = 0; i < 2; i++) {
     Limit& l = *ls[i];
     if (haveData && l.resetSecs >= 0 && remaining(l) == 0) l.pct = 0;   // window just reset
     int want = haveData ? shownPct(l) : -2;
-    if (want != drawnPct[i]) drawPctAndBar(i, l);
+    int day = (i == 1) ? targetDay(l) : 0;
+    if (want != drawnPct[i] || day != drawnDay[i]) drawPctAndBar(i, l);
     if (resetText(l) != drawnReset[i]) drawResetLine(i, l);
   }
   drawFooter();

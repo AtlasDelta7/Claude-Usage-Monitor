@@ -1,6 +1,7 @@
 # secrets - never commit
 smalltv/src/secrets.h
 bridge/config.json
+smalltv/ota.ini
 
 # build / runtime
 .pio/
@@ -8,3 +9,4 @@ bridge/config.json
 .venv/
 __pycache__/
 bridge/bridge.log*
+bridge/bridge.err.log
