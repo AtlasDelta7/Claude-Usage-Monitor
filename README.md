@@ -261,7 +261,7 @@ The display only updates while the Mac is awake and on the same Wi-Fi. When it s
 
 <p align="center"><img src="docs/night.jpg" alt="Night mode: black screen with a small orange mascot snoring" width="360"></p>
 
-Between **midnight and 7am** the display dims and goes black, except for a small mascot at the bottom snoring, with Zs drifting up from its head. At 7am the normal screen comes back.
+Between **midnight and 6am** the display dims and goes black, except for a small mascot at the bottom snoring, with Zs drifting up from its head. At 6am the normal screen comes back. The hours are adjustable (see [Customising](#customising)).
 
 - **Clock:** the display gets the time from the internet (NTP), so night mode works even when your computer is off or asleep. It's set to UK time; change `TZ_INFO` for another timezone (see [Customising](#customising)).
 - **Still at your Mac? It stays on.** On a Mac, the script tells the display with every update whether your screen is unlocked. At night, the display stays on while your Mac is unlocked. Lock it and the display sleeps at the next update (within about a minute); if the Mac goes to sleep or is turned off, it sleeps about 3 minutes later. Outside the night window the lock state is ignored and the display always shows your usage. Nothing needs setting up for this.
@@ -277,13 +277,15 @@ Between **midnight and 7am** the display dims and goes black, except for a small
 
 All of these are near the top of `smalltv/src/main.cpp`. Click **Upload** after changing any of them.
 
+To keep your own settings out of git (and out of the way when you pull updates), put them in **`smalltv/src/local_config.h`** instead: copy `local_config.example.h`, rename it, and uncomment the lines you want to change. Anything set there overrides the default in `main.cpp`.
+
 | What | Where |
 |---|---|
 | Brightness | `#define BRIGHTNESS 40`, as a percentage from 1 to 100 |
 | Colours | the `C_...` lines, e.g. `C_BG` for the background and `C_BLUE` for the bar |
 | Amber/red thresholds | `barColour()`: amber at 75%, red at 90% |
 | "Stale" warning delay | `STALE_MS`, 10 minutes by default |
-| Night mode hours | `NIGHT_START_H` and `NIGHT_END_H`, 0 and 7 by default. The window can cross midnight, e.g. 22 and 7 |
+| Night mode hours | `NIGHT_START_H` and `NIGHT_END_H`, 0 and 6 by default. The window can cross midnight, e.g. 22 and 7 |
 | Night brightness | `NIGHT_BRIGHTNESS`, as a percentage, 12 by default |
 | Timezone | `TZ_INFO`, a POSIX TZ string. UK by default (`GMT0BST,M3.5.0/1,M10.5.0`); e.g. US Eastern is `EST5EDT,M3.2.0,M11.1.0` |
 | How long "Mac unlocked" keeps it on | `AWAKE_MS`, 3 minutes after the last update that said unlocked |
@@ -302,7 +304,7 @@ To change how often the script checks claude.ai, edit `poll_seconds` in `config.
 | Bar turns amber or red | Over 75% or over 90% used |
 | Weekly bar split into 7 segments | One segment per day of your weekly window. Days count from when the window started, not from midnight |
 | White marker on the weekly bar | Today's target: the end of the current day, ~14% per day. Stay left of it and your usage lasts the whole week |
-| Black screen with a snoring mascot | Night mode, from midnight to 7am. See [Night mode](#night-mode) |
+| Black screen with a snoring mascot | Night mode, from midnight to 6am by default. See [Night mode](#night-mode) |
 | Screen layout shifts up | A message has appeared at the bottom. When everything's fine, the layout spreads out to fill the whole screen |
 | `Waiting for laptop  <IP>` | No data received yet since the display booted |
 | `No update for Xm - laptop off?` | The laptop script hasn't sent anything for over 10 minutes |

@@ -23,16 +23,36 @@
 #error "Add  #define PUSH_TOKEN \"...\"  to src/secrets.h - see README"
 #endif
 
+// Personal overrides for any setting below: put #defines in src/local_config.h
+// (git-ignored, optional - copy local_config.example.h).
+#if __has_include("local_config.h")
+#include "local_config.h"
+#endif
+
 #define BACKLIGHT_PIN 5          // active low
+#ifndef BRIGHTNESS
 #define BRIGHTNESS 40            // backlight, percent (1-100)
+#endif
+#ifndef STALE_MS
 #define STALE_MS (10UL * 60UL * 1000UL)   // no push for 10 min -> warn
+#endif
 
 // Night mode
+#ifndef TZ_INFO
 #define TZ_INFO "GMT0BST,M3.5.0/1,M10.5.0"  // POSIX TZ string; this is UK time
+#endif
+#ifndef NIGHT_START_H
 #define NIGHT_START_H 0                  // sleep screen from 00:00 ...
-#define NIGHT_END_H   7                  // ... until 07:00
+#endif
+#ifndef NIGHT_END_H
+#define NIGHT_END_H   6                  // ... until 06:00
+#endif
+#ifndef NIGHT_BRIGHTNESS
 #define NIGHT_BRIGHTNESS 12              // backlight percent while asleep
+#endif
+#ifndef AWAKE_MS
 #define AWAKE_MS (3UL * 60UL * 1000UL)   // computer counts as in use for 3 min after an a=1 push
+#endif
 
 constexpr uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
