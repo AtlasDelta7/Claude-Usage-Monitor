@@ -264,7 +264,7 @@ The display only updates while the Mac is awake and on the same Wi-Fi. When it s
 Between **midnight and 7am** the display dims and goes black, except for a small mascot at the bottom snoring, with Zs drifting up from its head. At 7am the normal screen comes back.
 
 - **Clock:** the display gets the time from the internet (NTP), so night mode works even when your computer is off or asleep. It's set to UK time; change `TZ_INFO` for another timezone (see [Customising](#customising)).
-- **Still at your Mac? It stays on.** On a Mac, the script tells the display with every update whether your screen is unlocked. At night, the display stays on while your Mac is unlocked. Lock it, or let it sleep, and the display sleeps within about 3 minutes. Nothing needs setting up for this.
+- **Still at your Mac? It stays on.** On a Mac, the script tells the display with every update whether your screen is unlocked. At night, the display stays on while your Mac is unlocked. Lock it and the display sleeps at the next update (within about a minute); if the Mac goes to sleep or is turned off, it sleeps about 3 minutes later. Outside the night window the lock state is ignored and the display always shows your usage. Nothing needs setting up for this.
 - On Windows and Linux the script doesn't report lock state, so the display always sleeps during the night window.
 - **Preview the sleep screen** at any time. This shows it for 2 minutes (put in your `PUSH_TOKEN`):
   ```bash
