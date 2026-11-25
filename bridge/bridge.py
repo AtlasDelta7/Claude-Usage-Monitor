@@ -9,6 +9,7 @@ Settings live in config.json next to this file (copy config.example.json).
 """
 import json
 import logging
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -92,7 +93,11 @@ def parse_time(s):
     # trim fractional seconds to 6 digits for older Pythons
     if "." in s:
         head, rest = s.split(".", 1)
-        frac = "".join(ch for ch in rest if ch.isdigit())
+        frac = ""
+        for ch in rest:  # leading digits only, stop at the timezone
+            if not ch.isdigit():
+                break
+            frac += ch
         tz = rest[len(frac):]
         s = f"{head}.{frac[:6]}{tz}"
     dt = datetime.fromisoformat(s)
@@ -122,6 +127,8 @@ def push(cfg, parsed, err=""):
                 secs = 0
             fields[short] = pct
             fields[short + "r"] = secs
+    if sys.platform == "darwin" and Path("/usr/bin/curl").exists():
+        return push_with_curl(cfg, fields)
     req = urllib.request.Request(
         f"http://{cfg['display']}/u",
         data=urllib.parse.urlencode(fields).encode(),
@@ -131,6 +138,27 @@ def push(cfg, parsed, err=""):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # LAN only, no proxy
     with opener.open(req, timeout=8) as r:
         return r.status
+
+
+def push_with_curl(cfg, fields):
+    """macOS blocks LAN access for background (launchd) Python with 'No route to host'
+    (Local Network privacy) and never offers a permission prompt. Apple's own
+    /usr/bin/curl is allowed, so send the push through it. The token goes in via
+    stdin so it doesn't show up in the process list."""
+    conf = "\n".join([
+        f'url = "http://{cfg["display"]}/u"',
+        f'header = "X-Token: {cfg["push_token"]}"',
+        f'data = "{urllib.parse.urlencode(fields)}"',
+        'noproxy = "*"', 'max-time = 8', 'silent', 'show-error',
+        'output = "/dev/null"', 'write-out = "%{http_code}"',
+    ])
+    r = subprocess.run(["/usr/bin/curl", "-K", "-"], input=conf, capture_output=True, text=True, timeout=15)
+    if r.returncode != 0:
+        raise OSError(f"curl exit {r.returncode}: {r.stderr.strip()}")
+    status = int(r.stdout.strip() or 0)
+    if status != 200:
+        raise OSError(f"HTTP {status}")
+    return status
 
 
 def setup_logging(to_console):
@@ -171,6 +199,7 @@ def run_forever(cfg):
     claude = Claude(cfg["session_key"], cfg.get("org_id"))
     parsed, err = None, ""
     next_fetch = 0.0
+    pushing_ok = False
     log.info("Bridge started, display=%s, poll=%ss", cfg["display"], cfg["poll_seconds"])
     while True:
         now = time.time()
@@ -192,8 +221,12 @@ def run_forever(cfg):
                 next_fetch = now + cfg["poll_seconds"]
         try:
             push(cfg, parsed, err)
+            if not pushing_ok:
+                log.info("Display updated OK")
+                pushing_ok = True
         except Exception as e:
             log.info("Display not reachable (%s)", e)
+            pushing_ok = False
         time.sleep(PUSH_EVERY)
 
 
