@@ -9,6 +9,7 @@ Settings live in config.json next to this file (copy config.example.json).
 """
 import json
 import logging
+import plistlib
 import subprocess
 import sys
 import time
@@ -117,8 +118,31 @@ def parse_usage(data):
     return out
 
 
+def mac_unlocked():
+    """True if someone is logged in at the Mac's screen and it isn't locked.
+    Read from the IORegistry (no extra permissions needed). None if unknown."""
+    try:
+        out = subprocess.run(["/usr/sbin/ioreg", "-n", "Root", "-d1", "-a"],
+                             capture_output=True, timeout=5).stdout
+        root = plistlib.loads(out)
+        if isinstance(root, list):
+            root = root[0] if root else {}
+        users = root.get("IOConsoleUsers") or []
+        on_console = [u for u in users if u.get("kCGSSessionOnConsoleKey")]
+        if not on_console:
+            return False          # login window / nobody at the screen
+        return not any(u.get("CGSSessionScreenIsLocked") for u in on_console)
+    except Exception:
+        return None
+
+
 def push(cfg, parsed, err=""):
     fields = {"err": err}
+    if sys.platform == "darwin":
+        # lets the display stay on at night while the Mac is unlocked
+        unlocked = mac_unlocked()
+        if unlocked is not None:
+            fields["a"] = 1 if unlocked else 0
     if parsed:
         now = datetime.now(timezone.utc)
         for short, (pct, reset) in parsed.items():

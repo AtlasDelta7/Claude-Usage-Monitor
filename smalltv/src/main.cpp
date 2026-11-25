@@ -4,14 +4,19 @@
 // - Password-protected OTA updates (smalltv.local)
 // - Receives usage from the laptop bridge: POST http://smalltv.local/u
 //   with header X-Token: PUSH_TOKEN and form fields
-//   s, sr (session %, seconds to reset), w, wr (weekly %, seconds to reset), err
+//   s, sr (session %, seconds to reset), w, wr (weekly %, seconds to reset), err,
+//   a (1 = the computer is unlocked/in use, 0 = locked), demo (seconds of sleep-screen preview)
 // - Counts reset timers down locally between pushes
+// - Night mode: between NIGHT_START_H and NIGHT_END_H (local time, from NTP) the
+//   screen dims and goes black except for a snoring mascot - unless the computer
+//   is still unlocked (the bridge sends a=1)
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ArduinoOTA.h>
 #include <WiFiManager.h>
 #include <TFT_eSPI.h>
+#include <time.h>
 #include "secrets.h"
 
 #ifndef PUSH_TOKEN
@@ -21,6 +26,13 @@
 #define BACKLIGHT_PIN 5          // active low
 #define BRIGHTNESS 40            // backlight, percent (1-100)
 #define STALE_MS (10UL * 60UL * 1000UL)   // no push for 10 min -> warn
+
+// Night mode
+#define TZ_INFO "GMT0BST,M3.5.0/1,M10.5.0"  // POSIX TZ string; this is UK time
+#define NIGHT_START_H 0                  // sleep screen from 00:00 ...
+#define NIGHT_END_H   7                  // ... until 07:00
+#define NIGHT_BRIGHTNESS 12              // backlight percent while asleep
+#define AWAKE_MS (3UL * 60UL * 1000UL)   // computer counts as in use for 3 min after an a=1 push
 
 constexpr uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
@@ -293,6 +305,123 @@ void refresh() {
   drawFooter();
 }
 
+// ---------- night mode ----------
+
+bool sleeping = false;
+bool macAwake = false;     // last push said the computer is unlocked
+uint32_t awakeAt = 0;      // millis() of that push
+uint32_t demoUntil = 0;    // sleep-screen preview end (millis), 0 = off
+
+void setBrightness(int pct) {
+  analogWrite(BACKLIGHT_PIN, 1023 - (1023 * constrain(pct, 1, 100)) / 100);  // inverted
+}
+
+bool isNightTime() {
+  time_t now = time(nullptr);
+  if (now < 1700000000) return false;   // clock not set yet (no NTP answer)
+  struct tm t;
+  localtime_r(&now, &t);
+  if (NIGHT_START_H <= NIGHT_END_H) return t.tm_hour >= NIGHT_START_H && t.tm_hour < NIGHT_END_H;
+  return t.tm_hour >= NIGHT_START_H || t.tm_hour < NIGHT_END_H;   // window crosses midnight
+}
+
+bool wantSleep() {
+  if (demoUntil && (long)(millis() - demoUntil) < 0) return true;
+  demoUntil = 0;
+  bool inUse = macAwake && millis() - awakeAt < AWAKE_MS;
+  return isNightTime() && !inUse;
+}
+
+// The mascot: an 18x6 pixel-art critter (body, side arms, 4 legs), drawn at
+// MS x scale. Rows are bitmasks, leftmost pixel = bit 17.
+const int MS = 6, M_W = 18, M_BODY = 5;
+const uint32_t M_ROWS[M_BODY] = {
+  0b000111111111111000,   // top of head
+  0b000111111111111000,
+  0b000111111111111000,   // eye row (eyes drawn on top)
+  0b011111111111111110,   // arms
+  0b000111111111111000,   // bottom of body
+};
+const int M_EYE_ROW = 2;
+const int M_LEGS[4] = {4, 6, 11, 13};  // leg columns
+const int M_EYES[2] = {5, 12};         // eye columns (row 1)
+const uint16_t C_MASCOT = rgb(235, 100, 50);   // more saturated than C_ACCENT so it stays orange when dimmed
+const uint16_t C_EYE  = rgb(40, 20, 14);
+const uint16_t C_ZZZ  = rgb(170, 170, 185);
+
+// sprite areas
+const int MASCOT_X = 62, MASCOT_Y = 176, MASCOT_W = 116, MASCOT_H = 46;
+const int ZZZ_X = 130, ZZZ_Y = 94, ZZZ_W = 100, ZZZ_H = 82;   // ends just above the mascot's head
+
+void drawMascot(TFT_eSPI& g, int ox, int oy, int lift) {
+  int x0 = ox + 4;
+  int bodyTop = oy + 4 - lift;                     // body rises when breathing in
+  int legTop  = bodyTop + M_BODY * MS;             // legs stretch so their feet stay planted
+  for (int r = 0; r < M_BODY; r++)
+    for (int c = 0; c < M_W; c++)
+      if (M_ROWS[r] & (1UL << (M_W - 1 - c)))
+        g.fillRect(x0 + c * MS, bodyTop + r * MS, MS, MS, C_MASCOT);
+  for (int c : M_LEGS)
+    g.fillRect(x0 + c * MS, legTop, MS, MS + lift, C_MASCOT);
+  for (int c : M_EYES)                           // closed eyes: short dark dashes
+    g.fillRect(x0 + c * MS, bodyTop + M_EYE_ROW * MS + MS / 2, MS, 2, C_EYE);
+}
+
+void drawZ(TFT_eSPI& g, float cx, float cy, float size, uint16_t c) {
+  float h = size / 2;
+  g.drawWideLine(cx - h, cy - h, cx + h, cy - h, 2, c, C_BG);
+  g.drawWideLine(cx + h, cy - h, cx - h, cy + h, 2, c, C_BG);
+  g.drawWideLine(cx - h, cy + h, cx + h, cy + h, 2, c, C_BG);
+}
+
+void enterSleep() {
+  tft.fillScreen(C_BG);
+  setBrightness(NIGHT_BRIGHTNESS);
+}
+
+// Called every loop while asleep: gentle breathing + three Zs drifting up.
+void animateSleep(bool force) {
+  const uint32_t BREATH_MS = 3600, Z_MS = 3600, FRAME_MS = 80;
+  static uint32_t lastFrame = 0;
+  static int drawnLift = -1;
+  uint32_t t = millis();
+  if (!force && t - lastFrame < FRAME_MS) return;
+  lastFrame = t;
+
+  int lift = (t % BREATH_MS) < BREATH_MS / 2 ? 2 : 0;
+  if (force || lift != drawnLift) {
+    flickerFree(MASCOT_X, MASCOT_Y, MASCOT_W, MASCOT_H,
+                [&](TFT_eSPI& g, int ox, int oy) { drawMascot(g, ox, oy, lift); });
+    drawnLift = lift;
+  }
+
+  flickerFree(ZZZ_X, ZZZ_Y, ZZZ_W, ZZZ_H, [&](TFT_eSPI& g, int ox, int oy) {
+    for (int k = 0; k < 3; k++) {
+      float p = ((t + k * Z_MS / 3) % Z_MS) / (float)Z_MS;     // 0 -> 1 as the Z rises
+      float fade = p < 0.2f ? p / 0.2f : (1 - p) / 0.8f;     // fade in, then out
+      uint16_t c = tft.alphaBlend((uint8_t)(255 * fade), C_ZZZ, C_BG);
+      float cx = ox + 18 + p * 50 + 4 * sinf(p * 6.3f);       // start above the head, drift up-right
+      float cy = oy + ZZZ_H - 7 - p * 60;
+      drawZ(g, cx, cy, 6 + p * 10, c);
+    }
+  });
+}
+
+void updateSleep() {
+  bool want = wantSleep();
+  if (want != sleeping) {
+    sleeping = want;
+    if (sleeping) {
+      enterSleep();
+      animateSleep(true);
+    } else {
+      setBrightness(BRIGHTNESS);
+      drawAll();
+    }
+  }
+  if (sleeping) animateSleep(false);
+}
+
 // ---------- push endpoint ----------
 
 void handlePush() {
@@ -313,6 +442,11 @@ void handlePush() {
     readLimit("w", "wr", week);
     haveData = true;
   }
+  if (server.hasArg("a")) {
+    macAwake = server.arg("a") == "1";
+    if (macAwake) awakeAt = now;
+  }
+  if (server.hasArg("demo")) demoUntil = now + constrain(server.arg("demo").toInt(), 0, 600) * 1000UL;
   err = newErr;
   lastPush = now;
   fresh = true;
@@ -330,7 +464,7 @@ void setup() {
   pinMode(BACKLIGHT_PIN, OUTPUT);
   analogWriteRange(1023);
   analogWriteFreq(10000);                                  // high PWM freq = no visible flicker
-  analogWrite(BACKLIGHT_PIN, 1023 - (1023 * constrain(BRIGHTNESS, 1, 100)) / 100);  // inverted
+  setBrightness(BRIGHTNESS);
   tft.init();
   tft.setRotation(0);
   bootScreen("Booting...", "", "", C_TEXT);
@@ -349,7 +483,7 @@ void setup() {
 
   ArduinoOTA.setHostname("smalltv");
   ArduinoOTA.setPassword(OTA_PASS);
-  ArduinoOTA.onStart([]() { bootScreen("Updating...", "Don't unplug", "", C_BLUE); });
+  ArduinoOTA.onStart([]() { setBrightness(BRIGHTNESS); bootScreen("Updating...", "Don't unplug", "", C_BLUE); });
   ArduinoOTA.begin();
 
   server.collectHeaders("X-Token");
@@ -357,6 +491,7 @@ void setup() {
   server.onNotFound([]() { server.send(404, "text/plain", ""); });
   server.begin();
 
+  configTime(TZ_INFO, "pool.ntp.org", "time.google.com");   // clock for night mode
   drawAll();
 }
 
@@ -364,8 +499,9 @@ void loop() {
   ArduinoOTA.handle();
   server.handleClient();
 
+  updateSleep();
   static uint32_t lastTick = 0;
-  if (fresh || millis() - lastTick > 5000) {
+  if (!sleeping && (fresh || millis() - lastTick > 5000)) {
     fresh = false;
     lastTick = millis();
     refresh();

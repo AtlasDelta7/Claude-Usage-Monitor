@@ -19,6 +19,7 @@ Turns a **GeekMagic SmallTV Ultra** (the ~£10 ESP8266 "mini TV" from AliExpress
 - [Part 2: Turn on wireless updates](#part-2--turn-on-wireless-updates)
 - [Part 3: Set up the laptop script](#part-3--set-up-the-laptop-script)
   - [Running it on a Mac](#36-running-it-on-a-mac)
+- [Night mode](#night-mode)
 - [Customising](#customising)
 - [What the display tells you](#what-the-display-tells-you)
 - [Troubleshooting](#troubleshooting)
@@ -256,6 +257,20 @@ The display only updates while the Mac is awake and on the same Wi-Fi. When it s
 
 ---
 
+## Night mode
+
+Between **midnight and 7am** the display dims and goes black, except for a small mascot at the bottom snoring, with Zs drifting up from its head. At 7am the normal screen comes back.
+
+- **Clock:** the display gets the time from the internet (NTP), so night mode works even when your computer is off or asleep. It's set to UK time; change `TZ_INFO` for another timezone (see [Customising](#customising)).
+- **Still at your Mac? It stays on.** On a Mac, the script tells the display with every update whether your screen is unlocked. At night, the display stays on while your Mac is unlocked. Lock it, or let it sleep, and the display sleeps within about 3 minutes. Nothing needs setting up for this.
+- On Windows and Linux the script doesn't report lock state, so the display always sleeps during the night window.
+- **Preview the sleep screen** at any time. This shows it for 2 minutes (put in your `PUSH_TOKEN`):
+  ```bash
+  curl -X POST -H "X-Token: YOUR_PUSH_TOKEN" -d "demo=120" http://smalltv.local/u
+  ```
+
+---
+
 ## Customising
 
 All of these are near the top of `smalltv/src/main.cpp`. Click **Upload** after changing any of them.
@@ -266,6 +281,10 @@ All of these are near the top of `smalltv/src/main.cpp`. Click **Upload** after 
 | Colours | the `C_...` lines, e.g. `C_BG` for the background and `C_BLUE` for the bar |
 | Amber/red thresholds | `barColour()`: amber at 75%, red at 90% |
 | "Stale" warning delay | `STALE_MS`, 10 minutes by default |
+| Night mode hours | `NIGHT_START_H` and `NIGHT_END_H`, 0 and 7 by default. The window can cross midnight, e.g. 22 and 7 |
+| Night brightness | `NIGHT_BRIGHTNESS`, as a percentage, 12 by default |
+| Timezone | `TZ_INFO`, a POSIX TZ string. UK by default (`GMT0BST,M3.5.0/1,M10.5.0`); e.g. US Eastern is `EST5EDT,M3.2.0,M11.1.0` |
+| How long "Mac unlocked" keeps it on | `AWAKE_MS`, 3 minutes after the last update that said unlocked |
 
 To change how often the script checks claude.ai, edit `poll_seconds` in `config.json`.
 - The minimum is 120, because faster polling risks being rate-limited.
@@ -281,6 +300,7 @@ To change how often the script checks claude.ai, edit `poll_seconds` in `config.
 | Bar turns amber or red | Over 75% or over 90% used |
 | Weekly bar split into 7 segments | One segment per day of your weekly window. Days count from when the window started, not from midnight |
 | White marker on the weekly bar | Today's target: the end of the current day, ~14% per day. Stay left of it and your usage lasts the whole week |
+| Black screen with a snoring mascot | Night mode, from midnight to 7am. See [Night mode](#night-mode) |
 | Screen layout shifts up | A message has appeared at the bottom. When everything's fine, the layout spreads out to fill the whole screen |
 | `Waiting for laptop  <IP>` | No data received yet since the display booted |
 | `No update for Xm - laptop off?` | The laptop script hasn't sent anything for over 10 minutes |
