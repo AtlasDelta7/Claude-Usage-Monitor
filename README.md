@@ -259,6 +259,8 @@ The display only updates while the Mac is awake and on the same Wi-Fi. When it s
 
 ## Night mode
 
+<p align="center"><img src="docs/night.jpg" alt="Night mode: black screen with a small orange mascot snoring" width="360"></p>
+
 Between **midnight and 7am** the display dims and goes black, except for a small mascot at the bottom snoring, with Zs drifting up from its head. At 7am the normal screen comes back.
 
 - **Clock:** the display gets the time from the internet (NTP), so night mode works even when your computer is off or asleep. It's set to UK time; change `TZ_INFO` for another timezone (see [Customising](#customising)).
