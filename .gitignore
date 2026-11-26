@@ -1,5 +1,6 @@
 # secrets - never commit
 smalltv/src/secrets.h
+smalltv/src/local_config.h
 bridge/config.json
 smalltv/ota.ini
 
